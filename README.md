@@ -101,3 +101,74 @@ Where does LangChain / LangGraph fit?
 
 LangChain — wires together steps 2-5 (query transform → retrieve → rerank → prompt → LLM). It's the glue inside Phase 2.
 LangGraph — used when Phase 2 becomes agentic (the LLM decides which tool to call, loops back if answer is bad, etc.) — more on this when we discuss agent pipelines
+
+
+
+PHASE 1 (Background, scheduled)          PHASE 2 (Real-time, user-triggered)
+
+New PDF lands in S3
+        ↓
+   Airflow DAG triggers
+        ↓
+   Parse → Clean → Chunk
+        ↓
+   Embed → Store in Vector DB  ←————————→  FastAPI receives question
+                                                    ↓
+                                           Query transform (LangChain)
+                                                    ↓
+                                           Search Vector DB (same DB)
+                                                    ↓
+                                           Re-rank → Build prompt
+                                                    ↓
+                                           LLM answers → return to user
+
+
+The Vector DB is the bridge between Phase 1 and Phase 2.
+Phase 1 writes to it. Phase 2 reads from it. That's the only connection point.
+
+
+rag-pipeline/
+│
+├── airflow/                        ← Phase 1 orchestration
+│   └── dags/
+│       └── ingestion_dag.py        ← your DAG (parse, clean, chunk, embed, store)
+│
+├── ingestion/                      ← Phase 1 logic (called by Airflow tasks)
+│   ├── parser.py                   ← PDF → raw text
+│   ├── cleaner.py                  ← remove garbage
+│   ├── chunker.py                  ← split + overlap
+│   └── embedder.py                 ← chunk → vector, store in ChromaDB
+│
+├── retrieval/                      ← Phase 2 logic (called by FastAPI)
+│   ├── query_transform.py          ← HyDE / multi-query
+│   ├── searcher.py                 ← hybrid search on ChromaDB
+│   ├── reranker.py                 ← Cohere rerank
+│   └── generator.py               ← build prompt → call LLM
+│
+├── api/                            ← Phase 2 entry point
+│   └── main.py                     ← FastAPI app, exposes /ask endpoint
+│
+├── chains/                         ← LangChain / LangGraph lives here
+│   ├── rag_chain.py                ← LangChain: wires retrieval → LLM
+│   └── agent_graph.py             ← LangGraph: if you add agentic behavior
+│
+├── vectordb/                       ← ChromaDB config / client
+│   └── chroma_client.py
+│
+├── docker-compose.yml              ← runs everything together locally
+├── Dockerfile                      ← for FastAPI service
+└── requirements.txt
+
+
+
+Summary in one line each
+
+Airflow = runs Phase 1 automatically
+ingestion/ folder = the actual Phase 1 code
+ChromaDB = the bridge between Phase 1 and Phase 2
+LangChain = wires Phase 2 steps together
+LangGraph = used if your Phase 2 becomes agentic (loops, tool calls)
+FastAPI = the door users knock on
+Docker = packages all of this so it runs anywhere
+
+
